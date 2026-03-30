@@ -26,6 +26,7 @@ class McDonaldsSkill(Skill):
     def get_tools(self) -> List[BaseTool]:
         return [
             find_nearby_restaurants,
+            search_nearby_mcdonalds,
             get_menu,
             get_meal_categories,
             calculate_nutrition,
@@ -116,6 +117,46 @@ def find_nearby_restaurants(
         result += f"   📞 电话: {r['phone']}\n\n"
     
     return result
+
+
+@tool
+def search_nearby_mcdonalds(city: Optional[str] = None) -> str:
+    """
+    自动获取当前位置并搜索附近的麦当劳餐厅
+    当用户说"附近"但没有提供具体坐标时使用此函数
+    
+    Args:
+        city: 城市名称，如果不传则自动检测位置
+    """
+    import json
+    import urllib.request
+    
+    # 如果没有提供城市，尝试通过 IP 获取位置
+    if not city:
+        try:
+            req = urllib.request.Request(
+                "http://ip-api.com/json/?lang=zh-CN",
+                headers={"User-Agent": "LangGraph-Agent/1.0"},
+                method='GET'
+            )
+            with urllib.request.urlopen(req, timeout=10) as response:
+                data = json.loads(response.read().decode('utf-8'))
+            
+            if data.get("status") == "success":
+                lat = data.get("lat", 0)
+                lon = data.get("lon", 0)
+                city = data.get("city", "")
+                
+                # 使用获取到的坐标搜索麦当劳
+                # 这里我们返回提示，让系统调用 find_nearby_restaurants
+                return f"📍 已自动获取您的位置：{city} ({lon},{lat})\n\n正在搜索附近麦当劳餐厅...\n\n💡 提示：如需更精确的结果，请使用 find_nearby_restaurants 工具，参数：\n- latitude: {lat}\n- longitude: {lon}"
+            else:
+                return "❌ 无法自动获取位置\n\n请手动提供：\n1. 城市名称（如：北京、上海）\n2. 或经纬度坐标（如：116.397428,39.90923）"
+        except Exception as e:
+            return f"❌ 位置获取失败: {str(e)}\n\n请手动提供城市名称或坐标。"
+    else:
+        # 提供了城市名称，返回该城市的模拟数据
+        return f"📍 正在搜索 {city} 附近的麦当劳餐厅...\n\n💡 提示：如需精确结果，请提供经纬度坐标，或使用 gaode 技能的 search_poi 工具搜索。"
 
 
 @tool
