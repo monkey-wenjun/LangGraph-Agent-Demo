@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LangGraph Agent Chat - 智能 Skill 选择</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="chat-container">
+        <div class="chat-header">
+            <div class="header-left">
+                <h1>🤖 LangGraph Agent</h1>
+                <span class="subtitle">支持智能 Skill 选择</span>
+            </div>
+            <div class="header-right">
+                <span class="thread-id" id="threadIdDisplay">session: ...</span>
+                <button class="skills-btn" onclick="toggleSkillsPanel()" title="查看可用技能">🔧</button>
+            </div>
+        </div>
+
+        <!-- 技能面板 -->
+        <div class="skills-panel" id="skillsPanel" style="display: none;">
+            <div class="skills-panel-header">
+                <h3>可用技能</h3>
+                <button class="close-btn" onclick="toggleSkillsPanel()">×</button>
+            </div>
+            <div class="skills-list" id="skillsList">
+                <div class="loading">加载中...</div>
+            </div>
+        </div>
+
+        <div class="messages" id="messages">
+            <div class="empty-state" id="emptyState">
+                <div class="welcome">
+                    <h2>👋 欢迎使用智能 Agent</h2>
+                    <p>我可以自动选择合适的技能来帮助你：</p>
+                    <div class="skill-examples">
+                        <div class="skill-tag" onclick="setInput('查询 example.com 的 A 记录')">🔍 DNS查询</div>
+                        <div class="skill-tag" onclick="setInput('列出当前目录的文件')">📁 文件浏览</div>
+                        <div class="skill-tag" onclick="setInput('帮我搜索 LangGraph 的最新消息')">🌐 网络搜索</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="input-area">
+            <input type="text" id="userInput" placeholder="输入消息，例如：查询 example.com 的 A 记录" autocomplete="off">
+            <button id="sendBtn" onclick="sendMessage()">发送</button>
+        </div>
+    </div>
+
+    <script>
+        const messagesEl = document.getElementById('messages');
+        const userInput = document.getElementById('userInput');
+        const sendBtn = document.getElementById('sendBtn');
+        const emptyState = document.getElementById('emptyState');
+        const threadIdDisplay = document.getElementById('threadIdDisplay');
+        const skillsPanel = document.getElementById('skillsPanel');
+        const skillsList = document.getElementById('skillsList');
+
+        let threadId = localStorage.getItem('agent_thread_id') || generateId();
+        localStorage.setItem('agent_thread_id', threadId);
+        threadIdDisplay.textContent = 'session: ' + threadId.slice(0, 8);
+
+        // 加载可用技能列表
+        loadSkills();
+
+        function generateId() {
+            return Math.random().toString(36).substring(2, 15);
+        }
+
+        function setInput(text) {
+            userInput.value = text;
+            userInput.focus();
+        }
+
+        userInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage();
+        });
+
+        // 加载技能列表
+        async function loadSkills() {
+            try {
+                const res = await fetch('/api/skills');
+                const data = await res.json();
+                renderSkills(data.skills);
+            } catch (err) {
+                console.error('加载技能失败:', err);
+            }
+        }
+
+        function renderSkills(skills) {
+            if (!skills || skills.length === 0) {
+                skillsList.innerHTML = '<div class="no-skills">暂无可用技能</div>';
+                return;
+            }
+
+            skillsList.innerHTML = skills.map(skill => `
+                <div class="skill-item">
+                    <div class="skill-name">${getSkillIcon(skill.name)} ${skill.name}</div>
+                    <div class="skill-desc">${skill.description}</div>
+                    <div class="skill-tools">
+                        ${skill.tools.map(t => `<span class="tool-tag">${t}</span>`).join('')}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function getSkillIcon(name) {
+            const icons = {
+                'cli': '⚡',
+                'file': '📄',
+                'web_search': '🌐',
+                'database': '🗄️',
+                'calculator': '🧮'
+            };
+            return icons[name] || '🔧';
+        }
+
+        function toggleSkillsPanel() {
+            const isVisible = skillsPanel.style.display !== 'none';
+            skillsPanel.style.display = isVisible ? 'none' : 'block';
+        }
+
+        function appendMessage(role, content, metadata = {}) {
+            if (emptyState) emptyState.style.display = 'none';
+
+            const div = document.createElement('div');
+            div.className = 'message ' + role;
+
+            // 添加技能标签
+            let skillTags = '';
+            if (metadata.active_skills && metadata.active_skills.length > 0) {
+                skillTags = `<div class="skill-call-tags">
+                    ${metadata.active_skills.map(s => `<span class="skill-call-tag">${getSkillIcon(s)} ${s}</span>`).join('')}
+                </div>`;
+            }
+
+            const bubble = document.createElement('div');
+            bubble.className = 'bubble';
+
+            if (role === 'tool') {
+                const label = document.createElement('div');
+                label.className = 'tool-label';
+                label.textContent = '🔧 工具执行: ' + (metadata.tool || 'unknown');
+                bubble.appendChild(label);
+            }
+
+            const text = document.createElement('div');
+            text.textContent = content;
+            bubble.appendChild(text);
+
+            div.innerHTML = skillTags;
+            div.appendChild(bubble);
+            messagesEl.appendChild(div);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+
+        // 显示技能选择过程
+        function showSkillSelection(skills) {
+            const div = document.createElement('div');
+            div.className = 'message skill-selection';
+            div.innerHTML = `
+                <div class="skill-selection-bubble">
+                    <div class="skill-selection-title">🤖 正在分析需求...</div>
+                    <div class="skill-selection-list">
+                        ${skills.length > 0 
+                            ? skills.map(s => `<span class="selected-skill">${getSkillIcon(s)} ${s}</span>`).join(' → ')
+                            : '<span class="no-skill">无需使用技能</span>'
+                        }
+                    </div>
+                </div>
+            `;
+            messagesEl.appendChild(div);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+            return div;
+        }
+
+        // 显示工具调用
+        function showToolCall(toolName, args) {
+            const div = document.createElement('div');
+            div.className = 'message tool-call';
+            div.innerHTML = `
+                <div class="tool-call-bubble">
+                    <div class="tool-call-title">⚡ 调用 ${toolName}</div>
+                    <div class="tool-call-args">${JSON.stringify(args, null, 2)}</div>
+                </div>
+            `;
+            messagesEl.appendChild(div);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+
+        function showTyping() {
+            const div = document.createElement('div');
+            div.className = 'message assistant';
+            div.id = 'typingIndicator';
+            div.innerHTML = '<div class="bubble typing"><span></span><span></span><span></span></div>';
+            messagesEl.appendChild(div);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+
+        function hideTyping() {
+            const el = document.getElementById('typingIndicator');
+            if (el) el.remove();
+        }
+
+        async function sendMessage() {
+            const text = userInput.value.trim();
+            if (!text) return;
+
+            appendMessage('user', text);
+            userInput.value = '';
+            sendBtn.disabled = true;
+            showTyping();
+
+            try {
+                const res = await fetch('/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: text, thread_id: threadId })
+                });
+                const data = await res.json();
+                hideTyping();
+
+                // 显示技能选择
+                if (data.active_skills && data.active_skills.length > 0) {
+                    showSkillSelection(data.active_skills);
+                }
+
+                // 显示工具调用过程
+                if (data.skill_calls) {
+                    data.skill_calls.forEach(call => {
+                        if (call.event === 'tool_call') {
+                            showToolCall(call.tool, call.arguments);
+                        }
+                    });
+                }
+
+                // 显示 AI 回复
+                appendMessage('assistant', data.reply, {
+                    active_skills: data.active_skills
+                });
+
+                if (data.thread_id) {
+                    threadId = data.thread_id;
+                    localStorage.setItem('agent_thread_id', threadId);
+                    threadIdDisplay.textContent = 'session: ' + threadId.slice(0, 8);
+                }
+            } catch (err) {
+                hideTyping();
+                appendMessage('assistant', '请求失败: ' + err.message);
+            } finally {
+                sendBtn.disabled = false;
+                userInput.focus();
+            }
+        }
+    </script>
+</body>
+</html>
